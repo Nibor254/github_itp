@@ -1,89 +1,3 @@
-# Import relevant libraries and modules
-from flask import (
-    Flask,
-    render_template,
-    request,
-    redirect,
-    send_from_directory,
-)
-from werkzeug.utils import secure_filename
-import os
-from os.path import join, splitext, exists, getmtime
-from os import urandom, listdir
-
-app = Flask(__name__)
-
-app.secret_key = urandom(24)
-
-# Set the folder where images are stored
-# Use /pictures for production (container), uploads for local dev
-app.config["UPLOAD_FOLDER"] = os.getenv("PICTURES_DIR", "uploads")
-
-# Ensure upload folder exists
-os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-
-IMG_EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".gif"}
-
-
-def is_img_file(fname):
-    """Check if filename has a valid image extension."""
-    _, extension = splitext(fname)
-    return extension.lower() in IMG_EXTENSIONS
-
-
-def get_images():
-    """
-    Get list of images from the upload folder.
-    Returns list of dicts with file_name and mtime (modification time).
-    """
-    upload_folder = app.config["UPLOAD_FOLDER"]
-
-    if not exists(upload_folder):
-        return []
-
-    images = []
-    for filename in listdir(upload_folder):
-        if is_img_file(filename):
-            file_path = join(upload_folder, filename)
-            try:
-                mtime = getmtime(file_path)
-                images.append({
-                    "file_name": filename,
-                    "mtime": mtime
-                })
-            except OSError:
-                # Skip files that can't be accessed
-                continue
-
-    # Sort by modification time (newest first)
-    images.sort(key=lambda x: x["mtime"], reverse=True)
-
-    return images
-
-
-# Define route for the index (home) page, accepting only GET method
-@app.route("/", methods=["GET"])
-def index():
-    return render_template("index.html", images=get_images())
-
-
-# Define route with accepted methods GET and POST
-@app.route("/upload", methods=["GET", "POST"])
-def upload_file():
-    # Check if the method of the request is POST (form data submission)
-    if request.method == "POST":
-        if "file" not in request.files:
-            print("no file in request")
-            return redirect(request.url)  # Redirect user back to the form page
-
-        file = request.files["file"]
-
-        if file.filename == '' or not is_img_file(file.filename):
-            return render_template("message.html", message="No valid image file provided")
-
-        fname = secure_filename(file.filename)
-        file_path = join(app.config["UPLOAD_FOLDER"], fname)
-
         # Save the file to the specified directory
         file.save(file_path)
 
@@ -113,5 +27,26 @@ def get_static(name):
 
 
 # To keep the application running
+# Define route to delete an image
+@app.route("/delete/<imgname>", methods=["POST"])
+def delete_image(imgname):
+"""
+Delete an image from the filesystem.
+Redirects to home page after deletion.
+"""
+# Sanitize filename to prevent path traversal attacks
+fname = secure_filename(imgname)
+file_path = join(app.config["UPLOAD_FOLDER"], fname)
+# Delete file from filesystem if it exists
+try:
+if exists(file_path):
+os.remove(file_path)
+
+print(f"Deleted: {fname}", file=sys.stdout)
+else:
+print(f"File not found: {fname}", file=sys.stderr)
+except OSError as err:
+print(f"Filesystem error: {err}", file=sys.stderr)
+return redirect("/")
 if __name__ == "__main__":
     app.run(debug=True, port=5001, host='0.0.0.0')
